@@ -1,123 +1,182 @@
+-- ==================================================
+-- US Household Income Data Analysis
+-- Database: us_income_project
+-- ==================================================
+
+-- ==================================================
+-- PART 1: DATA CLEANING
+-- ==================================================
+
+-- Initial data exploration
+SELECT * FROM us_income_project.ushouseholdincome;
 SELECT * FROM us_income_project.ushouseholdincome_statistics;
 
-Select *
-From us_income_project.ushouseholdincome
-;
+-- --------------------------------------------------
+-- 1. Remove Duplicate Records
+-- --------------------------------------------------
 
-Select *
-From us_income_project.ushouseholdincome_statistics;
+-- Delete duplicate records from ushouseholdincome table
+DELETE FROM ushouseholdincome
+WHERE row_id IN (
+    SELECT row_id 
+    FROM (
+        SELECT row_id, id,
+               ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) AS row_num
+        FROM us_income_project.ushouseholdincome
+    ) AS duplicates
+    WHERE row_num > 1
+);
 
-# Lets Start Cleaning the Data by deleting duplicates
+-- Check for duplicates in statistics table
+SELECT id, COUNT(id) AS duplicate_count
+FROM ushouseholdincome_statistics
+GROUP BY id
+HAVING COUNT(id) > 1;
 
-Delete From ushouseholdincome
-Where row_id IN (
-				select row_id 
-                From ( select row_id,id,
-		                          ROW_NUMBER() OVER ( PARTITION BY id order by id) as row_num
-                       from us_income_project.ushouseholdincome
-                       ) as dup
-                 Where row_num > 1
-	             );   
-                       
-	Select id, Count(id)
-    from ushouseholdincome_statistics
-    Group by id
-    Having count(id) >1;
-    
-    ## we dont have any duplicates in the above table but the other table has 6 and we delete that.
-    
-    
-update ushouseholdincome
+-- Note: Statistics table has no duplicates, but main table had 6 duplicates which were removed
+
+-- --------------------------------------------------
+-- 2. Fix Data Quality Issues
+-- --------------------------------------------------
+
+-- Fix misspelled state name: 'georia' -> 'Georgia'
+UPDATE ushouseholdincome
 SET State_name = 'Georgia'
-Where State_name = 'georia';
+WHERE State_name = 'georia';
 
+-- Fix incorrect place name
 UPDATE ushouseholdincome
 SET place = 'Autaugaville'
 WHERE City = 'Vinemont';
 
-Select Type, Count(Type)
-From ushouseholdincome
-Group by Type ;
+-- Review Type distribution
+SELECT Type, COUNT(Type) AS count
+FROM ushouseholdincome
+GROUP BY Type
+ORDER BY count DESC;
 
+-- Standardize Type values: 'Boroughs' -> 'Borough'
 UPDATE ushouseholdincome
-SET Type  = 'Borough'
-Where Type = 'Boroughs';
+SET Type = 'Borough'
+WHERE Type = 'Boroughs';
 
-select ALAND, AWATER
-From ushouseholdincome
-where ALAND IN ( '','0')
-     OR AWATER IN ('', '0');
-     
-     
-# Thats all cleaning we need which includes column name, duplciates and null values 
+-- Check for null or zero values in land and water area
+SELECT ALAND, AWATER
+FROM ushouseholdincome
+WHERE ALAND IN ('', '0')
+   OR AWATER IN ('', '0');
 
-## Part Two Explonatory Data Analysis of US household income
+-- Data cleaning complete
 
-Select State_Name , Sum(ALAND), SUM(AWATER)
-from ushouseholdincome
-Group by State_Name
-Order by 2 DESC;     
 
-#TEXAS has Largest Land Area now check for the WATER
+-- ==================================================
+-- PART 2: EXPLORATORY DATA ANALYSIS
+-- ==================================================
 
-Select State_Name , Sum(ALAND), SUM(AWATER)
-from ushouseholdincome
-Group by State_Name
-Order by 3 DESC; 
+-- --------------------------------------------------
+-- 3. Geographic Analysis: Land and Water Area
+-- --------------------------------------------------
 
-Select State_Name , Sum(ALAND), SUM(AWATER)
-from ushouseholdincome
-Group by State_Name
-Order by 3 DESC
-Limit 10;
-
-## Yep MICHIGAN.. top
-
+-- States with largest total land area
 SELECT 
-    State_Name, SUM(ALAND), SUM(AWATER)
-FROM
-    ushouseholdincome
+    State_Name, 
+    SUM(ALAND) AS Total_Land_Area, 
+    SUM(AWATER) AS Total_Water_Area
+FROM ushouseholdincome
 GROUP BY State_Name
-ORDER BY 2 DESC
+ORDER BY Total_Land_Area DESC
 LIMIT 10;
+-- Result: Texas has the largest land area
 
+-- States with largest total water area
+SELECT 
+    State_Name, 
+    SUM(ALAND) AS Total_Land_Area, 
+    SUM(AWATER) AS Total_Water_Area
+FROM ushouseholdincome
+GROUP BY State_Name
+ORDER BY Total_Water_Area DESC
+LIMIT 10;
+-- Result: Michigan has the largest water area
 
-Select ui.State_Name,  Mean, Median
-From ushouseholdincome as ui
-INNER JOIN ushouseholdincome_statistics as us
-ON ui.id = us.id
-Where Mean <> '0';
+-- --------------------------------------------------
+-- 4. Income Analysis by State
+-- --------------------------------------------------
 
+-- Average mean and median income by state
+SELECT 
+    ui.State_Name,
+    ROUND(AVG(us.Mean), 2) AS Avg_Mean_Income,
+    ROUND(AVG(us.Median), 2) AS Avg_Median_Income
+FROM ushouseholdincome AS ui
+INNER JOIN ushouseholdincome_statistics AS us
+    ON ui.id = us.id
+WHERE us.Mean <> 0
+GROUP BY ui.State_Name
+ORDER BY Avg_Mean_Income DESC;
 
+-- --------------------------------------------------
+-- 5. Income Analysis by Community Type
+-- --------------------------------------------------
 
-Select Type, Count(Type) ,ROUND(AVG(Mean),1), ROUND(AVG(Median),1)
-From ushouseholdincome as ui
-INNER JOIN ushouseholdincome_statistics as us
-      ON ui.id = us.id
-Where Mean <> '0'
-Group by 1
-HAVING Count(Type) > 100
-Order by 4 DESC
-Limit 20;
+-- Average income by type (with minimum 100 occurrences)
+SELECT 
+    ui.Type,
+    COUNT(ui.Type) AS Count,
+    ROUND(AVG(us.Mean), 1) AS Avg_Mean_Income,
+    ROUND(AVG(us.Median), 1) AS Avg_Median_Income
+FROM ushouseholdincome AS ui
+INNER JOIN ushouseholdincome_statistics AS us
+    ON ui.id = us.id
+WHERE us.Mean <> 0
+GROUP BY ui.Type
+HAVING COUNT(ui.Type) > 100
+ORDER BY Avg_Median_Income DESC
+LIMIT 20;
 
-# lets see which State in which community earn less
+-- --------------------------------------------------
+-- 6. Specific Analysis: Community Type Locations
+-- --------------------------------------------------
 
-Select * 
-From ushouseholdincome
-Where Type = 'Community' ;
+-- Identify all Community type locations
+SELECT * 
+FROM ushouseholdincome
+WHERE Type = 'Community';
+-- Result: Puerto Rico has Community type locations with lower income
 
-## it turn out to be Puerto Rico
+-- --------------------------------------------------
+-- 7. Income Analysis by City
+-- --------------------------------------------------
 
-## Check for the cities
+-- Cities with highest average income
+SELECT 
+    ui.State_Name,
+    ui.City,
+    ROUND(AVG(us.Mean), 1) AS Avg_Mean_Income,
+    ROUND(AVG(us.Median), 1) AS Avg_Median_Income
+FROM ushouseholdincome AS ui
+INNER JOIN ushouseholdincome_statistics AS us
+    ON ui.id = us.id
+WHERE us.Mean <> 0
+GROUP BY ui.State_Name, ui.City
+ORDER BY Avg_Mean_Income DESC
+LIMIT 20;
+-- Result: Delta Junction, Alaska has the highest average mean income
 
-Select ui.State_Name, City,ROUND(AVG(Mean),1), ROUND(AVG(Median),1)
-From ushouseholdincome as ui
-INNER JOIN ushouseholdincome_statistics as us
-      ON ui.id = us.id
-Where Mean <> '0'
-Group by ui.State_Name, City
-Order by  ROUND(AVG(Mean),1) DESC ;
+-- Cities with lowest average income
+SELECT 
+    ui.State_Name,
+    ui.City,
+    ROUND(AVG(us.Mean), 1) AS Avg_Mean_Income,
+    ROUND(AVG(us.Median), 1) AS Avg_Median_Income
+FROM ushouseholdincome AS ui
+INNER JOIN ushouseholdincome_statistics AS us
+    ON ui.id = us.id
+WHERE us.Mean <> 0
+GROUP BY ui.State_Name, ui.City
+ORDER BY Avg_Mean_Income ASC
+LIMIT 20;
 
-## Delta Junction in Alaska has the hihger mean AVG income.. 
-
-
+-- ==================================================
+-- END OF ANALYSIS
+-- ==================================================
